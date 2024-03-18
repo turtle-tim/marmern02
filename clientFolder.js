@@ -4,67 +4,209 @@ The schema for client folder should do the followings:
 2) format through getters all special characters except "-" in all customized schema types,
 3) compartmentalize staff's entries,
 4) only store concise tags, [String] < a schemaType- map to throw error
-5) allow for ndarray.
-NOTE: I dropped the schema for client activity as we can easily trace it by timeOfEntry
+5) prompt clients' self-affirmation of resources- be those somatic, psychosocial/ interpersonal, systemic/ legal
+6) allow for ndarray,
+7) save date as moment,
+8) JS get parent,
+9) DARN-ACT,
+10) cycle of change,
+11) follow up questions if there are signs of reactance- Stop, Drop, ,
+12) enum of resolution must be one of the 3
+
+NOTE 1: I dropped the schema for client activity as we can easily trace it by timeOfEntry
+NOTE 2: Depending on what the 2nd floor find overly verbose or just adequately strength-based and solution-focused, 
+we can embed prompts for some MI, somatic experiencing, traditional teaching and systemic intervention into our schemas
 */
 const mg=require("mongoose")
-const moment=require("moment").moment
+require("mongoose-moment")(mg)
+const moment=require("moment")
 const validEmail=/^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/
 const validPostal=/([A-Za-z]\d[A-Za-z]\S\d[A-Za-z]\d)|([A-Za-z]\d[A-Za-z]\d[A-Za-z]\d)|(\d{5}-\d{4})/
+const validPhone=/\d{7}||\d{3}[\s-]\d{4}||\d{10}||[1\s-]{0,2}\d{3}[\s-]\d{3}[\s-]\d{4}||[1\s-]{0,2}\(\d{3}\)[\s-]{0,1}\d{3}[\s-]\d{4}/
 function stripSpec(somthing){// (2)
     return somthing.replace(/[\W\S^/^.^,^'^-]*/g,"")
 }
 
+// Deprecated
 class justDate extends mg.SchemaType{
     constructor(key,options){super(key,options,"justDate")}
     cast(date){return moment(date).format("YYYYMMDD")}
 }
 mg.Schema.Types.justDate=justDate
 
-const need=new mg.Schema({//subDocument first layer (5)
-    item:{type:String,required:[true,"(Required) What did the client state they need?"],get:stripSpec},
-    urgency:{type:Number,required:[true,"(Required) How pressing did the client state the need was?"],min:1,max:10},
-    isAddressed:Boolean
+//First layer
+const resource= new mg.Schema({
+    resourceType:{type:String,enum:["somatic","psychosocial/ interpersonal","financial","traditional teaching","systemic/ legal"]}
 })
 
-const entry=new mg.Schema(//subschema aka subDocument second layer (3)
+const DARN=new Set(["Desire more","Ability to act","Reason not to stay the same","Need to try something new"])
+const ACT=new Set(["Activating language (e.g. \"thinking about it\")","Committing to act","Taking steps"])
+const DARNACT=new Set([...DARN,...ACT])
+const motive=new mg.Schema({//DARN-ACT (9)
+    item:{type:String,required:[true,"Fill in the blanks"],get:stripSpec},
+    changeTalk:{type:String,enum:DARNACT,required:[true,"Pick one"]},
+    talkType:{type:String,get:function(){return DARN.has(this.changeTalk)?"Preparatory":"Mobilizing"}}
+})
+
+const reaction=new mg.Schema({// subDoc layer 0
+    envisionedStep:{type:String,get:stripSpec},
+    envisionedCatastrophe:{type:map,of:{type:String,get:stripSpec}},//subDoc!
+    realityCheck:{type:map,of:{type:Boolean,get:stripSpec},required:function(){
+        return this.envisionedCatastrophe.length?[true,"(Required) How did you and your client review the basis of the fear?"]:
+        [false,"You can skip it"]},
+        validate:function(v){return [v.length==this.envisionedCatastrophe.length,
+            "The list of Reality Check must have the same number of item as the list of Catatstrophes"]}
+    },//subDoc!
+    miracleQuestion:{type:map,of:{type:String,get:stripSpec},required:function(){
+        return this.envisionedCatastrophe.length?[true,"(Required) How did you and your client review the basis of the fear?"]:
+        [false,"You can skip it"]},
+        validate:function(v){return [v.length==this.envisionedCatastrophe.length,
+            "The list of Miracle Questions must have the same number of item as the list of Catatstrophes"]}},//subDoc!
+    gainTalk:{type:map,of:{type:String,get:stripSpec},
+        required:[true,"(Required) What did the client state they\'d stand to gain by trying to take the step?"]}
+})
+const action=new mg.Schema({
+    step:String,
+    priority:Number,
+    excitement:{type:Number,required:[true,"(Required) REACTANCE PREVENTION! How excited or comfortable was the client to talk about it?"],min:1,max:7},
+    concreteness:{type:Number,required:[true,"(Required) REACTANCE PREVENTION! How genuiene and specific could the client talk about it?"],min:1,max:7},
+    staffReposition:{type:Boolean,required:function(){// (11)
+        return this.excitement<4&&this.concreteness<4?
+        [true,"(Required) Did you take a step back and convey to the client that you\'re not pushing for a solution against their will?"]:
+        [false,"You can skip it"]}},
+    staffRestoreAllyship:{type:Boolean,required:function(){// (11)
+        return this.excitement<4&&this.concreteness<4?
+        [true,"(Required) Did you invite the client to accept your role as an ally?"]:
+        [false,"You can skip it"]}},
+    clientAutonomy:{type:map,of:{type:String,get:stripSpec},required:function(){// (11) subDoc! NEED (8)
+        return this.excitement<4&&this.concreteness<4?
+        [true,"(Required) What asset/ resource did the client agree to lean on to restore their sense of control?"]:[false,"You can skip it"]}},
+    sitWithSustainTalk:{type:map,of:asset,required:function(){// (11) subDoc! 
+        return this.excitement<4&&this.concreteness<4?
+        [true,"(Required) How did you reflect and, only then, reframe the client\'s sustain talk?"]:[false,"You can skip it"]}},
+    clientGainTalk:{type:map,of:reaction,required:function(){// (11) subDoc!
+        return this.excitement<4&&this.concreteness<4?
+        [true,"(Required) Please elaborate on how the client and you discussed how some piece(s) of the planned action may translate into outcomes they\'d like to see"]:
+        [false,"You can skip it"]}},
+    resolution:{type:map,of:{type:String,enum:{values:["try it","scrap it","alter it (Please add another action item)"],message:"Must be one of the three"}},
+        required:function(){// (11) subDoc!
+            return this.excitement<4&&this.concreteness<4?
+            [true,"(Required) What did the client and you decided to do with this action plan?"]:[false,"You can skip it"]}}
+})
+
+const meansOfContact=new mg.Schmea({
+    role:{type:String,enum:["informal (caregiver, family or friends)","legal","EIA","CFS","CLDS","other agency or systemic support"],
+        required:[true,"(Required) Select one"]},
+    location:{type:String,required:function(){
+        return this.role!="informal (caregiver, family or friends)"?[true,"(Required) Fill in the blanks"]:[false,"You can skip it"]}},
+    email:{type:String,required:function(){
+        return this.role!="informal (caregiver, family or friends)"?[true,"(Required) Fill in the blanks"]:[false,"You can skip it"]},
+        match:[validEmail,"Fill in a valid email"]},
+    phoneNum:{type:String,required:function(){
+        return this.role!="informal (caregiver, family or friends)"?[true,"(Required) Fill in the blanks"]:[false,"You can skip it"]},
+        trim:true,get:stripSpec,match:[validPhone,"Fill in a valid phone number"]}
+})
+
+const supportContact=new mg.Schema({
+    supportFirstName:{type:String,get:stripSpec},
+    supportLastName:{type:String,get:stripSpec},
+    contact:meansOfContact//subDoc!
+})
+
+//Second layer
+const need=new mg.Schema({// (6)
+    nature:{type:[resource],required:[true,"(Required) Under what aspect was the client\'s need fall?"],// subDoc!
+        validate:[function(val){return val.length<=5},"You selected duplicates as we have only 5 types"]},
+    item:{type:String,required:[true,"(Required) What did the client state they needed?"],get:stripSpec},
+    urgency:{type:Number,required:[true,"(Required) How pressing did the client state the need was?"],min:1,max:7},
+    wantOurIntervention:{type:Boolean,required:[true,"(Required) Even you talking about it counts as \'yes\'"]},
+    isAddressed:{type:Boolean,required:function(){
+        return this.wantOurIntervention?[true,"(Required) Did we do anything about it?"]:[false,"you can skip it"]
+    }},
+    declairedMotivation:{type:[motive],required:function(){//subDoc!
+        return this.wantOurIntervention?[true,"(Required) What did the client consider to be the reasons to work through the challenge?"]:
+        [false,"you can skip it"]
+    }},
+    contractedActionPlan:{type:[action],required:function(){//subDoc!
+        return this.wantOurIntervention?[true,"(Required) What did your client and you agree to do?"]:[false,"you can skip it"]
+    }}
+})
+
+const asset=new mg.Schema({
+    nature:{type:[resource],rquired:[true,"(Required) Under what aspect was the client\'s resource fall?"],//subDoc!
+    validate:[function(val){return val.length<=4},"You selected duplicates as we have only 4 types"]},
+    item:{type:String,required:[true,"(Required) To what did the client state they could resort?"],get:stripSpec},
+    reliability:{type:Number,required:[true,"(Required) How often did the client state they can tap into the resource?"],min:1,max:7},
+    resourceContact:{type:map,of:supportContact,required:function(){
+        return this.nature!="somatic"&&this.nature!="traditional teaching"?
+        [true,"(Required) Please elaborate how to get in touch with them"]:[false,"You can skip it"]
+    }},
+    wantOurSupport:{type:Boolean,required:[true,"(Required) Even you talking about it counts as \'yes\'"]},
+    isAddressed:{type:Boolean,required:function(){
+        return this.wantOurSupport?[true,"(Required) Did we do anything about it?"]:[false,"you can skip it"]
+    }},
+    declairedMotivation:{type:[motive],required:function(){//subDoc!
+        return this.wantOurSupport?[true,"(Required) What did the client consider to be the reasons to work through the challenge?"]:
+        [false,"you can skip it"]
+    }},
+    contractedActionPlan:{type:[action],required:function(){//subDoc!
+        return this.wantOurSupport?[true,"(Required) What did your client and you agree to do?"]:[false,"you can skip it"]
+    }}
+})
+
+//Third layer
+const entry=new mg.Schema(//subschema aka subDocument (3)
     {
-        nature:{type:String,required:[true,"nature of entry"],index:true},
-        staffIntervention:[String],
+        staffInterventionAbstract:[{type:String,required:[true,"(Required) In brief, what did you do? [elaborate later]"],get:stripSpec}],//subDoc!
         isInteractive:Boolean,
-        clientFeltNeed:[need],
-        clientObservableResponse:{type:map,of:String,required:function(){
+        clientResource:[asset],//subDoc!
+        clientFeltNeed:{type:map,of:need,required:[true,"(Required) Elaborate what you and your client agreed to work on"]},//subDoc!
+        clientObservableResponse:{type:map,of:{type:String,get:stripSpec},required:function(){// subDoc!
             return this.isInteractive?[true,"(Required) How did the client receive?"]:[false,"You can skip it"]
         }},
         clientWellness:{type:Number,required:function(){
-            return this.isInteractive?[true,"(Required) How did they feel/ how do you infer they feel- 1(worst) to 10(best)?"]:[false,"You can skip it"]
-        },min:1,max:10},
-        staffReflection:{type:map,of:String,required:[false,"(Optional) How are you feeling?"]},// (4)
-        staffId:{type:schema.Types.ObjectId,ref:"staffSchema"},
-        timeOfEntry:{type:Date,default:Date.now}//save dates (without time) regularly- as ISODate
+            return this.isInteractive?[true,"(Required) How did they feel/ how do you infer they feel- 1(worst) to 7(best)?"]:[false,"You can skip it"]
+        },min:1,max:7},
+        staffReflection:{type:map,of:{type:String,get:stripSpec},required:[false,"(Optional) How are you feeling?"]},// (4) subDoc!
+        staffId:{type:mg.Schema.Types.ObjectId,ref:"staffSchema"},
+        timeOfEntry:{type:Date,get:()=>Date.now()}//save dates (without time) regularly- as ISODate
     },
     {timestamps:true}
 )
 
-const phia=new mg.Schema({//subDocument second layer (1)
+const phia=new mg.Schema({// (1)
     relationToClient:String,
     firstName:{type:String,required:[true,"(Required) Fill in the blanks"],trim:true,get:stripSpec},
     lastName:{type:String,required:[true,"(Required) Fill in the blanks"],trim:true,get:stripSpec},
     canContact:{type:String,required:[true,"(Required) Type \"yes\", \"no\" or \"only if neccessary\""],enum:["yes","no","only if neccessary"]},
-    emergencyContact:{type:Boolean,required:function(){return this.canContact!="no"?false:true}},
+    emergencyContact:{type:Boolean,required:function(){return this.canContact!="no"}},
     address:{type:String,required:[false,"(Optional) It is ok if you don\'t know or don't have one"]},
     postal:{type:String,required:function(){return this.address? true:[false,"You can skip it"]},validate:[validPostal,"Fill in a postal/ zip code"]},
     email:{type:String,required:[false,"(Optional) It is ok if you don't know or don\'t have one"],match:[validEmail,"Fill in a valid email"]},
-    phoneNum:{type:String,required:[false,"(Optional) It is ok if you don't know or don\'t have one"],trim:true,get:stripSpec},
-    asset:{type:[String],get:stripSpec},
-    need:{type:[need],required:function(){return this.canContact=="yes"?[true,"(Required)"]:[false,"You can skip it"]},get:stripSpec}
+    phoneNum:{type:String,required:[false,"(Optional) It is ok if you don't know or don\'t have one"],trim:true,get:stripSpec,
+        match:[validPhone,"Fill in a valid phone number"]},
+    dateOfBirth:Date,// NEED (7)!
+    //CFS involvement
+    everInvolvedWithCFS:{type:Boolean,default:false},
+    currentlyWithCFS:{type:Boolean,required:function(){return this.everInvolvedWithCFS},
+    default:function(){return dateOfPhiaEntry-this.dateOfBirth>18*(1461/4*24*60*60*1000)&&this.everInvolvedWithCFS}},//Date.now()-new Date("yyyy-mm-dd")
+    placementSatisfaction:{type:Number,min:1,max:7,
+        required:function(){return this.currentlyWithCFS?
+            [true,"(Required) How did the client state they felt about the current arrangement?"]:[false,"You can skip it"]}},
+    upcomingReunification:{type:Boolean,required:function(){return this.currentlyWithCFS},default:function(){return this.placementSatisfaction<4}},
+    projectedReunificationDate:{type:Date,required:function(){return this.upcomingReunification}},
+    //data entry
+    staffId:{type:mg.Schema.Types.ObjectId,ref:"staffSchema"},
+    dateOfPhiaEntry:{type:Date,get:()=>Date.now()},// Date.now is a function
+
 })
 
+//Main layer
 const clientFolder=new mg.Schema({
     clientID:schema.Types.ObjectId,
     clientPhia:[phia],
     staffEntry:[entry],
-    dateOfFolderCreation:{type:justDate,default:moment(Date.now).format("YYYYMMDD")}//! Do I need mongoose-moment?
+    dateOfFolderCreation:Date//WILL PASS THROUGH MOMENT/ MONGOOSE-MOMENT  NEED (7)!
 })
 
 module.exports=mg.model("clientFolder",clientFolder)
