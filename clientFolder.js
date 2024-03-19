@@ -18,8 +18,8 @@ NOTE 2: Depending on what the 2nd floor find overly verbose or just adequately s
 we can embed prompts for some MI, somatic experiencing, traditional teaching and systemic intervention into our schemas
 */
 const mg=require("mongoose")
-require("mongoose-moment")(mg)
-const moment=require("moment")
+//require("mongoose-moment")(mg)// WILL PHASE OUT!
+const moment=require("moment")// MIGHT BE USELESS!
 const validEmail=/^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/
 const validPostal=/([A-Za-z]\d[A-Za-z]\S\d[A-Za-z]\d)|([A-Za-z]\d[A-Za-z]\d[A-Za-z]\d)|(\d{5}-\d{4})/
 const validPhone=/\d{7}||\d{3}[\s-]\d{4}||\d{10}||[1\s-]{0,2}\d{3}[\s-]\d{3}[\s-]\d{4}||[1\s-]{0,2}\(\d{3}\)[\s-]{0,1}\d{3}[\s-]\d{4}/
@@ -27,7 +27,7 @@ function stripSpec(somthing){// (2)
     return somthing.replace(/[\W\S^/^.^,^'^-]*/g,"")
 }
 
-// Deprecated
+// WILL DEPRECATE!
 class justDate extends mg.SchemaType{
     constructor(key,options){super(key,options,"justDate")}
     cast(date){return moment(date).format("YYYYMMDD")}
@@ -35,22 +35,23 @@ class justDate extends mg.SchemaType{
 mg.Schema.Types.justDate=justDate
 
 //First layer
+const rt=["somatic/ self-counselling techniques (e.g., grounding, expressive art)","psychosocial/ interpersonal","financial","traditional teaching","systemic/ legal"]
 const resource= new mg.Schema({
-    resourceType:{type:String,enum:["somatic","psychosocial/ interpersonal","financial","traditional teaching","systemic/ legal"]}
+    resourceType:{type:String,enum:{values:rt,message:"You picked a resource type that we didn\'t expect. Please educate us."}}
 })
 
-const DARN=new Set(["Desire more","Ability to act","Reason not to stay the same","Need to try something new"])
-const ACT=new Set(["Activating language (e.g. \"thinking about it\")","Committing to act","Taking steps"])
-const DARNACT=new Set([...DARN,...ACT])
+const DARN=["Desire more","Ability to act","Reason not to stay the same","Need to try something new"]
+const ACT=["Activating language (e.g. \"thinking about it\")","Committing to act","Taking steps"]
+const DARNACT=DARN.concat(ACT)
 const motive=new mg.Schema({//DARN-ACT (9)
     item:{type:String,required:[true,"Fill in the blanks"],get:stripSpec},
     changeTalk:{type:String,enum:DARNACT,required:[true,"Pick one"]},
-    talkType:{type:String,get:function(){return DARN.has(this.changeTalk)?"Preparatory":"Mobilizing"}}
+    talkType:{type:String,get:function(){return DARN.includes(this.changeTalk)?"Preparatory":"Mobilizing"}}
 })
 
 const reaction=new mg.Schema({// subDoc layer 0
     envisionedStep:{type:String,get:stripSpec},
-    envisionedCatastrophe:{type:map,of:{type:String,get:stripSpec}},//subDoc!
+    envisionedCatastrophe:[{type:String,get:stripSpec}],
     realityCheck:{type:map,of:{type:Boolean,get:stripSpec},required:function(){
         return this.envisionedCatastrophe.length?[true,"(Required) How did you and your client review the basis of the fear?"]:
         [false,"You can skip it"]},
@@ -113,10 +114,13 @@ const supportContact=new mg.Schema({
     contact:meansOfContact//subDoc!
 })
 
+const cycleOfChange=["Pre-contemplate","Contemplate","Prepare","Act","Maintain","Relapse",
+"Terminate (no more need for pointed intervention)","OUT OF OUR HAND (need referral)"]// (10)
+
 //Second layer
 const need=new mg.Schema({// (6)
     nature:{type:[resource],required:[true,"(Required) Under what aspect was the client\'s need fall?"],// subDoc!
-        validate:[function(val){return val.length<=5},"You selected duplicates as we have only 5 types"]},
+        validate:[function(val){return val.length<=rt.length},`"You might have selected duplicates as we have only ${rt.length} types"`]},
     item:{type:String,required:[true,"(Required) What did the client state they needed?"],get:stripSpec},
     urgency:{type:Number,required:[true,"(Required) How pressing did the client state the need was?"],min:1,max:7},
     wantOurIntervention:{type:Boolean,required:[true,"(Required) Even you talking about it counts as \'yes\'"]},
@@ -129,12 +133,18 @@ const need=new mg.Schema({// (6)
     }},
     contractedActionPlan:{type:[action],required:function(){//subDoc!
         return this.wantOurIntervention?[true,"(Required) What did your client and you agree to do?"]:[false,"you can skip it"]
+    }},
+    cycleOfChange:{cycleOfChange,required:[true,"(Required) Specific to overcoming this need, how would you position the client in the cycle of change?"],
+    default:function(){
+        return this.wantOurIntervention?this.urgency>3?this.isAddressed?"Act":"Prepare":
+                                            this.isAddressed?"Contemplate":this.urgency>2?"Maintain":"Terminate (no more need for pointed intervention)":
+                                        this.urgency>5?"OUT OF OUR HAND (need referral)":this.urgency>3?"Pre-contemplate":"Maintain"
     }}
 })
 
 const asset=new mg.Schema({
     nature:{type:[resource],rquired:[true,"(Required) Under what aspect was the client\'s resource fall?"],//subDoc!
-    validate:[function(val){return val.length<=4},"You selected duplicates as we have only 4 types"]},
+    validate:[function(val){return val.length<=rt.length},`"You might have selected duplicates as we have only ${rt.length} types"`]},
     item:{type:String,required:[true,"(Required) To what did the client state they could resort?"],get:stripSpec},
     reliability:{type:Number,required:[true,"(Required) How often did the client state they can tap into the resource?"],min:1,max:7},
     resourceContact:{type:map,of:supportContact,required:function(){
@@ -151,6 +161,12 @@ const asset=new mg.Schema({
     }},
     contractedActionPlan:{type:[action],required:function(){//subDoc!
         return this.wantOurSupport?[true,"(Required) What did your client and you agree to do?"]:[false,"you can skip it"]
+    }},
+    cycleOfChange:{cycleOfChange,required:[true,"(Required) Specific to leaning on this asset, how would you position the client in the cycle of change?"],
+    default:function(){
+        return this.wantOurSupport?this.reliability<4?this.isAddressed?"Act":"Prepare":
+                                            this.isAddressed?"Contemplate":this.reliability<6?"Maintain":"Terminate (no more need for pointed intervention)":
+                                        this.reliability<3?"OUT OF OUR HAND (need referral)":this.reliability<2?"Pre-contemplate":"Maintain"
     }}
 })
 
@@ -161,6 +177,7 @@ const entry=new mg.Schema(//subschema aka subDocument (3)
         isInteractive:Boolean,
         clientResource:[asset],//subDoc!
         clientFeltNeed:{type:map,of:need,required:[true,"(Required) Elaborate what you and your client agreed to work on"]},//subDoc!
+        callsForUrgentReferral:{type:Number,default:0,get:()=>this.clientResource.cycleOfChange.reduce((placeHolder,str)=>placeHolder+str.includes("OUT OF HAND"),0)},
         clientObservableResponse:{type:map,of:{type:String,get:stripSpec},required:function(){// subDoc!
             return this.isInteractive?[true,"(Required) How did the client receive?"]:[false,"You can skip it"]
         }},
@@ -168,6 +185,7 @@ const entry=new mg.Schema(//subschema aka subDocument (3)
             return this.isInteractive?[true,"(Required) How did they feel/ how do you infer they feel- 1(worst) to 7(best)?"]:[false,"You can skip it"]
         },min:1,max:7},
         staffReflection:{type:map,of:{type:String,get:stripSpec},required:[false,"(Optional) How are you feeling?"]},// (4) subDoc!
+        //data entry
         staffId:{type:mg.Schema.Types.ObjectId,ref:"staffSchema"},
         timeOfEntry:{type:Date,get:()=>Date.now()}//save dates (without time) regularly- as ISODate
     },
