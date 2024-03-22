@@ -4,6 +4,7 @@ CRUD staff credential as admin
     getAllUsers,
     createNewUser,
     updateUser,
+    deactivateUser,
     deleteUser
 username,password,roles, active
 username,email,password,firstName,lastName,role,isActive
@@ -44,25 +45,41 @@ const updateUser=async(req,res)=>{
     return res.status(400).json({message:"You need to fill up the form properly"})
     const note=await clientFolder.findById(id).exec()
     if(!note) res.status(400).json({message:"(Warning) Staff member has no entry"})
+    const foundUser=await Staff.findOne({username}).exec()
     const duplicate=await Staff.findOne({username}).collation({locate:"en",strength:2}).lean().exec()
     if(duplicate&&duplicate?._id.toString()!==id)return res.status(409).json({message:"Duplicated username"})
 
-    Staff.username=username
-    Staff.role=roles
-    Staff.active=active
-    Staff.password=hash(password,genSalt(process.env.SALT_NUM))
-    res.status(200).json(`"${(await Staff.save()).username}" updated`)
+    foundUser.username=username
+    foundUser.role=roles
+    foundUser.active=active
+    foundUser.password=hash(password,genSalt(process.env.SALT_NUM))
+    res.status(200).json(`"${(await foundUser.save()).username}" updated`)
 }//updateUser
 
+const changeActivateUser=async()=>{
+    const{username,email}=req.body
+    if(!email||!username)return res.status(400).json({message:"Fill in the blanks"})
+    const foundUser=await findOne({email:email}).exec()
+    if(!foundUser)return res.status(400).json({message:"No users found"})
+    if(username!=foundUser.username)return res.status(400).json({message:"Credential incorrect"})
+    const legacy1=await clientFolder.findOne({staffId:foundUser._id}).lean().exec()
+    const legacy2=await clientFolder.findOne({staffEntry:{"$elemMatch":{staffId:foundUser._id}}}).lean().exec()
+    if(legacy1||legacy2)res.json({message:`(Warning) staff-${username} contributed to the client folder`})
+    foundUser.active=!foundUser.active
+    res.status(200).json(`"${(await foundUser.save()).username}" updated`)
+}//changeActivateUser
+
 const deleteUser=async(req,res)=>{
-    const{id,username}=req.body
-    if(!id)return res.status(400).json({message:"You need to put in an ID"})
+    const{username,email}=req.body
+    if(!email)return res.status(400).json({message:"You need to put in an email"})
     const user=await findById(id).exec()
     if(!user)return res.status(400).json({message:"No users found"})
-    if(await clientFolder.findOne({user:id}).lean().exec())
-        return res.status(400).json({message:`User-${username}, still has some note(s). Chill the f out`})
+    if(email!=user.email)return res.status(400).json({message:"Credential incorrect"})
+    const legacy1=await clientFolder.findOne({staffId:foundUser._id}).lean().exec()
+    const legacy2=await clientFolder.findOne({staffEntry:{"$elemMatch":{staffId:foundUser._id}}}).lean().exec()
+    if(legacy1||legacy2)return res.status(400).json({message:`(Error) Chill out! Staff-${username} contributed to the client folder`})
     const result=await user.deleteOne()
     res.status(200).json(`Deleted user-${result.username}, whose ID was ${result._id}`)
 }//deleteUser
 
-module.exports={getAllUsers,createNewUser,updateUser,deleteUser}
+module.exports={getAllUsers,createNewUser,updateUser,changeActivateUser,deleteUser}
