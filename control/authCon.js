@@ -64,10 +64,10 @@ const resetPassword=(req,res)=>{
     jwtVer(cookies.jwt,process.env.RESET_TOKEN_SECRET,
         async(err,decoded)=>{
             if(err)return res.status(403).json({message:"Forbidden"})
-            const foundUser=await Staff.findOne({_id:decoded._id}).exec()
+            const foundUser=await Staff.findById(decoded._id).exec()
             if(!foundUser)return res.status(401).json({message:"Unauthorized"})
             foundUser.password=newPw
-            res.status(200).json(`"${(await Staff.save()).username}" updated`)
+            res.status(200).json(`"${(await foundUser.save()).username}" updated`)
         }
     )
 }//resetPassword
